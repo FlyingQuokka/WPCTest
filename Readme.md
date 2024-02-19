@@ -23,8 +23,8 @@ This application allows users to enter a latitude, longitude and month to displa
 1. Clone the repository:
    git clone https://github.com/FlyingQuokka/WPCTest
 
-2. Navigate to the project directory:
-   cd crime-data-summary
+2. Navigate to the project directory e.g.
+   cd wpctest
 
 3. Restore the project dependencies:
    dotnet restore

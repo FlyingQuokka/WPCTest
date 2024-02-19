@@ -1,105 +1,71 @@
-﻿namespace WPCTest.Tests;
-
-using Microsoft.AspNetCore.Mvc.Testing;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Moq;
 using System.Collections.Generic;
-using System.Net.Http;
 using System.Threading.Tasks;
+using WPCTest.Models;
+using WPCTest.Pages;
+using WPCTest.Services;
 using Xunit;
 
-/// <summary>
-/// Provides integration tests for the Index Razor Page, ensuring the page correctly handles user input and displays data.
-/// </summary>
-public class IndexPageTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>> {
-	private readonly HttpClient _client = factory.CreateClient();
+public class IndexModelTests {
+	private readonly Mock<CrimeDataService> _mockCrimeDataService;
+	private readonly IndexModel _indexModel;
 
-	/// <summary>
-	/// Verifies that the form submission with valid data correctly displays crime data.
-	/// </summary>
-	[Fact]
-	public async Task Post_ValidData_ReturnsCrimeSummary() {
-		// Arrange
-		var formData = new FormUrlEncodedContent(new[] {
-			new KeyValuePair<string, string>("Latitude", "51.509865"),
-			new KeyValuePair<string, string>("Longitude", "-0.118092"),
-			new KeyValuePair<string, string>("Date", "2021-01"),
-		});
-
-		// Act
-		var response = await _client.PostAsync("/", formData);
-		var responseString = await response.Content.ReadAsStringAsync();
-
-		// Assert
-		Assert.Contains("anti-social-behaviour", responseString);
+	public IndexModelTests() {
+		_mockCrimeDataService = new Mock<CrimeDataService>();
+		_indexModel = new IndexModel(_mockCrimeDataService.Object);
 	}
 
-	/// <summary>
-	/// Tests the behavior of the Index page when the API returns an error or no data.
-	/// </summary>
 	[Fact]
-	public async Task Post_ApiFailureOrEmptyData_ShowsNoDataMessage() {
+	public async Task OnPostAsync_WithMissingLatitude_ReturnsPageWithModelError() {
 		// Arrange
-		// Simulate API failure or no data scenario. This might involve setting up a mock server,
-		// adjusting the application's startup configuration for testing to use a mock service,
-		// or using predefined conditions in your application that you can trigger for testing.
-
-		var formData = new FormUrlEncodedContent(new[] {
-			new KeyValuePair<string, string>("Latitude", "51.509865"),
-			new KeyValuePair<string, string>("Longitude", "-0.118092"),
-			new KeyValuePair<string, string>("Date", "2021-01"),
-		});
+		_indexModel.Longitude = "0.1278";
+		_indexModel.Date = "2023-01-01";
 
 		// Act
-		var response = await _client.PostAsync("/", formData);
-		var responseString = await response.Content.ReadAsStringAsync();
+		var result = await _indexModel.OnPostAsync();
 
 		// Assert
-		Assert.Contains("No crime data available", responseString);
+		Assert.False(_indexModel.ModelState.IsValid);
+		Assert.Contains(_indexModel.ModelState, ms => ms.Key == nameof(_indexModel.Latitude));
 	}
 
-	/// <summary>
-	/// Tests form submission with missing or invalid data and verifies that appropriate validation messages are displayed.
-	/// </summary>
-	[Theory]
-	[InlineData("", "-0.118092", "2021-01", "Latitude is required.")]
-	[InlineData("51.509865", "", "2021-01", "Longitude is required.")]
-	[InlineData("51.509865", "-0.118092", "", "Date is required.")]
-	public async Task Post_InvalidData_ReturnsValidationMessage(string latitude, string longitude, string date, string expectedMessage) {
+	[Fact]
+	public async Task OnPostAsync_ServiceThrowsException_AddsModelError() {
 		// Arrange
-		var formData = new FormUrlEncodedContent(new[] {
-			new KeyValuePair<string, string>("Latitude", latitude),
-			new KeyValuePair<string, string>("Longitude", longitude),
-			new KeyValuePair<string, string>("Date", date),
-		});
+		_mockCrimeDataService.Setup(s => s.GetCrimeDataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+							 .ThrowsAsync(new System.Exception("Service error"));
+		_indexModel.Latitude = "50.827845";
+		_indexModel.Longitude = "-0.143088";
+		_indexModel.Date = "2023-01-01";
 
 		// Act
-		var response = await _client.PostAsync("/", formData);
-		var responseString = await response.Content.ReadAsStringAsync();
+		var result = await _indexModel.OnPostAsync();
 
 		// Assert
-		Assert.Contains(expectedMessage, responseString);
+		Assert.False(_indexModel.ModelState.IsValid);
+		var modelStateEntry = Assert.Contains(string.Empty, _indexModel.ModelState);
+		var modelError = Assert.Single(modelStateEntry!.Errors);
+		Assert.Equal("Service error", modelError.ErrorMessage);
 	}
 
-	/// <summary>
-	/// Tests the behavior of the Index page when an unexpected error occurs, ensuring that a user-friendly error message is displayed.
-	/// </summary>
 	[Fact]
-	public async Task Post_UnexpectedError_DisplaysGenericErrorMessage() {
+	public async Task OnPostAsync_WithValidInput_CallsGetCrimeDataAsyncOnce() {
 		// Arrange
-		// To simulate an unexpected error, you may need to configure a scenario within your application
-		// that triggers an error, such as providing input that causes an exception or temporarily modifying
-		// a service to throw an exception. This setup would be specific to how your application is architected.
+		var expectedData = new List<CrimeCategorySummary> { new CrimeCategorySummary { Category = "theft", Crimes = [] } };
+		_mockCrimeDataService.Setup(s => s.GetCrimeDataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+							 .ReturnsAsync(expectedData);
 
-		var formData = new FormUrlEncodedContent(new[] {
-			new KeyValuePair<string, string>("Latitude", "invalid"), // Provide data that might lead to an unexpected error
-            new KeyValuePair<string, string>("Longitude", "invalid"),
-			new KeyValuePair<string, string>("Date", "invalid"),
-		});
+		_indexModel.Latitude = "50.827845";
+		_indexModel.Longitude = "-0.143088";
+		_indexModel.Date = "2023-01-01";
 
 		// Act
-		var response = await _client.PostAsync("/", formData);
-		var responseString = await response.Content.ReadAsStringAsync();
+		await _indexModel.OnPostAsync();
 
 		// Assert
-		Assert.Contains("An unexpected error occurred", responseString);
+		_mockCrimeDataService.Verify(s => s.GetCrimeDataAsync("50.827845", "-0.143088", "2023-01-01"), Times.Once);
+		Assert.Equal(expectedData, _indexModel.CrimeData);
 	}
 }
